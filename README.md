@@ -1,6 +1,6 @@
 # Learn WebGPU (in parts)
 
-Each segment of learning is tagged
+Each segment of learning is tagged (i.e. `step1`), see tags to browse that step.
 
 ### Running Server
 
@@ -9,10 +9,6 @@ npx live-server
 ```
 
 ## Step 1
-
-📖 Concepts Learned
-
-How to:
 
 - Request an adapter and device from WebGPU.
 - Configure a canvas context with the preferred texture format.
