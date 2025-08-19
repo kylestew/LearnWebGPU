@@ -26,3 +26,14 @@ npx live-server
 - Bind the vertex buffer with `pass.setVertexBuffer(0, vertexBuffer)` and draw a colored triangle.
 
 ![Step 2 — Vertex Buffer + Color](images/step2.png)
+
+## Step 3
+
+- Use a uniform buffer to pass time, aspect ratio, and amplitude to shaders.
+- Define a WGSL `Uniforms` struct and read it in the vertex stage via `@group(0) @binding(0)`.
+- Animate the triangle by wobbling vertices over time using `sin(time + x)`; drive updates with `requestAnimationFrame`.
+- Preserve proportions by scaling x by the canvas aspect in the vertex shader.
+- Create a bind group for the uniform buffer and bind it with `pass.setBindGroup(0, bindGroup)`; write new uniform values each frame.
+- Leverage `layout: 'auto'` to obtain the bind group layout from the pipeline.
+
+![Step 3 — Uniforms + Animation](images/step3.png)
