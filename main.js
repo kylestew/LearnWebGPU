@@ -1,87 +1,108 @@
-// Basic feature check
 if (!('gpu' in navigator)) {
     alert('WebGPU not supported in this browser.')
     throw new Error('WebGPU not supported')
 }
-
 const canvas = document.getElementById('gfx')
 const context = canvas.getContext('webgpu')
 
-// 1) adapter + device
-// adapter: which GPU am I talking to
-// device: your connection to the GPU through WebGPU used to create
-//   resources and submit work
-// (note: in practice you only request these once and pass them around your app)
+// 1) device + context
 const adapter = await navigator.gpu.requestAdapter()
 const device = await adapter.requestDevice()
-
-// 2) configure swapchain
-// WebGPU doesn't assume anything, you must configure the html context to tell it:
-// - Which GPU device it should use
-// - What texture format the canvas expects
-// - How alpha blending with the page background should work
 const format = navigator.gpu.getPreferredCanvasFormat()
 context.configure({ device, format, alphaMode: 'opaque' })
 
-// 3) WGSL shader (procedural triangle via vertex_index)
+// 2) WGSL: VS consumes:
+// - @location(0) position
+// - @location(1) color
+// These are described in the pipeline's vertex layout later in the code
 const shaderWGSL = /* wgsl */ `
+struct VSOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) color: vec3<f32>,
+};
+
 @vertex
-fn vs(@builtin(vertex_index) i : u32) -> @builtin(position) vec4<f32> {
-    var pos = array<vec2<f32>, 3>(
-        vec2<f32>( 0.0, 0.6),
-        vec2<f32>(-0.6,-0.6),
-        vec2<f32>( 0.6,-0.6)
-    );
-    return vec4<f32>(pos[i], 0.0, 1.0);
+fn vs(@location(0) inPos: vec2<f32>,
+      @location(1) inCol: vec3<f32>) -> VSOut {
+    var out: VSOut;
+    out.pos = vec4<f32>(inPos, 0.0, 1.0);
+    out.color = inCol;
+    return out;
 }
 
 @fragment
-fn fs() -> @location(0) vec4<f32> {
-    return vec4<f32>(1.0, 0.5, 0.2, 1.0); // orange
+fn fs(@location(0) color: vec3<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(color, 1.0);
 }
 `
-// parses WGSL and runs checks (not fully compiled until pipeline use)
 const module = device.createShaderModule({ code: shaderWGSL })
 
-// 4) pipeline
-// An immutable recipe that bakes together shader + state:
-// - your shaders (vertex + fragment)
-// - the fixed-function state (topology, depth/stencil, blending, msaa, vertex layout)
-// - the binding layout (uniforms, textures, samplers)
-// You create it once, then reuse it every frame
+// 3) Vertex data (interleaved: [x,y r,g,b] per vertex)
+// prettier-ignore
+const verts = new Float32Array([
+    // x,   y,    r,   g,   b
+     0.0, 0.6,  1.0, 0.2, 0.2, // top   (red-ish)
+    -0.6,-0.6,  0.2, 1.0, 0.2, // left  (green-ish)
+     0.6,-0.6,  0.2, 0.6, 1.0, // right (blue-ish)
+]);
+// allocate memory on the GPU
+// - VERTEX - you're allowed to bind it with `pass.setVertexBuffer(...)`
+// - COPY_DST - you're allowed to copy into it from the CPU with `writeBuffer`
+const vertexBuffer = device.createBuffer({
+    size: verts.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+})
+// Upload the bytes from JS into the GPU buffer (asynchronous call)
+device.queue.writeBuffer(vertexBuffer, 0, verts)
+
+// 4) Describe the interleaved layout to the pipeline
+// (vertex descriptor)
+// stride = 5 floats * 4 bytes = 20 bytes per-vertex
+// This is also where we specify the @location(n) mappings for our WGSL above
+const vertexBuffers = [
+    {
+        arrayStride: 5 * 4,
+        attributes: [
+            { shaderLocation: 0, offset: 0, format: 'float32x2' }, // position (x, y)
+            { shaderLocation: 1, offset: 2 * 4, format: 'float32x3' }, // color (r, g, b)
+        ],
+    },
+]
+
+// 5) Pipeline with vertex layout
+// we pass in our vertex description to the vertex function
 const pipeline = await device.createRenderPipelineAsync({
     layout: 'auto',
-    vertex: { module, entryPoint: 'vs' },
+    vertex: { module, entryPoint: 'vs', buffers: vertexBuffers },
     fragment: { module, entryPoint: 'fs', targets: [{ format }] },
-    primitive: { topology: 'triangle-list' },
+    primitive: { topology: 'triangle-list', cullMode: 'none' },
 })
 
-// 5) draw loop
+// 6) draw loop
 function frame() {
-    // collects command you want the GPU to run
     const encoder = device.createCommandEncoder()
-    // The canvas context holds a swap chain of textures
-    // We are asking for the next texture to render into here
     const view = context.getCurrentTexture().createView()
 
-    // Render pass describes the textures and resources bound to draw one frame
     const pass = encoder.beginRenderPass({
         colorAttachments: [
             {
-                view, // texture target from canvas context
-                loadOp: 'clear', // op before drawing
+                view,
+                loadOp: 'clear',
                 clearValue: { r: 0.06, g: 0.08, b: 0.1, a: 1.0 },
-                storeOp: 'store', // op after drawing
+                storeOp: 'store',
             },
         ],
     })
 
     pass.setPipeline(pipeline)
-    pass.draw(3) // invoke shader 3 times each with an incrementing `vertex_index`
-    pass.end() // done describing our render pass
 
-    // Put our command buffer into the GPU's command queue
-    // GPU commands are executed asynchronously
+    // this binds our vertex data to the program/shader
+    // slot 0 matches the single layout we declared
+    pass.setVertexBuffer(0, vertexBuffer)
+
+    pass.draw(3)
+    pass.end()
+
     device.queue.submit([encoder.finish()])
     requestAnimationFrame(frame)
 }
