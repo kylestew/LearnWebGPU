@@ -37,3 +37,14 @@ npx live-server
 - Leverage `layout: 'auto'` to obtain the bind group layout from the pipeline.
 
 ![Step 3 — Uniforms + Animation](images/step3.png)
+
+## Step 4
+
+- Introduce an index buffer (`GPUBufferUsage.INDEX`) to reuse vertex data.
+- Expand geometry to a rectangle (two triangles) and store indices as `Uint16Array`.
+- Switch draw call to `pass.drawIndexed(indexCount)` and bind the index buffer via `pass.setIndexBuffer`.
+- Keep the interleaved vertex buffer and pipeline layout the same; only add the index buffer.
+- Continue writing uniforms each frame to animate (builds on Step 3).
+- Ensure aspect-correct rendering still works after geometry changes.
+
+![Step 4 — Index Buffer + Rectangle](images/step4.png)
