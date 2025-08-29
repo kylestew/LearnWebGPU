@@ -1,3 +1,6 @@
+// add this at the top
+import { mat4, vec3 } from 'https://cdn.jsdelivr.net/npm/wgpu-matrix@3/+esm'
+
 if (!('gpu' in navigator)) throw new Error('WebGPU not supported')
 
 const canvas = document.getElementById('gfx')
@@ -10,135 +13,156 @@ context.configure({ device, format, alphaMode: 'opaque' })
 
 // WSGL: positions + UVs, sample tex with sampler
 const shaderWGSL = /* wgsl */ `
-@group(0) @binding(0) var samp: sampler;
-@group(0) @binding(1) var tex: texture_2d<f32>;
+struct Uniforms {
+    mvp: mat4x4<f32>,
+};
+@group(0) @binding(0) var<uniform> U: Uniforms;
 
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
-    @location(0) uv: vec2<f32>,
+    @location(0) color: vec3<f32>,
 };
 
 @vertex
-fn vs(@location(0) inPos: vec2<f32>,
-      @location(1) inUV: vec2<f32>) -> VSOut {
+fn vs(@location(0) inPos: vec3<f32>,
+      @location(1) inCol: vec3<f32>) -> VSOut {
     var out: VSOut;
-    out.pos = vec4<f32>(inPos, 0.0, 1.0); // clip-space position
-    out.uv = inUV;
+    out.pos = U.mvp * vec4<f32>(inPos, 1.0);
+    out.color = inCol;
     return out;
 }
 
 @fragment
-fn fs(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    return textureSample(tex, samp, uv);
+fn fs(@location(0) color: vec3<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(color, 1.0);
 }
 `
 const module = device.createShaderModule({ code: shaderWGSL })
 
-// Vertex Data: 2 triangles forming a quad (pos.xy, uv.xy)
-// Clip-space quad ~ 1.6 x 1.6 units centered, UVs 0..1
+// Cube geometry: (pos.xyz, color.rgb | interleaved)
 // prettier-ignore
 const verts = new Float32Array([
-    // x,    y,  u,  v
-    -0.8,  0.8,  0,  0,
-    -0.8, -0.8,  0,  1,
-     0.8, -0.8,  1,  1,
-
-    -0.8,  0.8,  0,  0,
-     0.8, -0.8,  1,  1,
-     0.8,  0.8,  1,  0,
+    // front (+Z)
+    -1,-1, 1,   1,0,0,
+     1,-1, 1,   1,1,0,
+     1, 1, 1,   1,1,1,
+    -1, 1, 1,   1,0,1,
+    // back (-Z)
+    -1,-1,-1,   0,0,1,
+     1,-1,-1,   0,1,1,
+     1, 1,-1,   0,1,0,
+    -1, 1,-1,   0,0,0,
+]);
+// 12 triangles (36 indices), CCW
+// prettier-ignore
+const indices = new Uint16Array([
+    0,1,2,  2,3,0,  // front
+    1,5,6,  6,2,1,  // right
+    5,4,7,  7,6,5,  // back
+    4,0,3,  3,7,4,  // left
+    3,2,6,  6,7,3,  // top
+    4,5,1,  1,0,4,  // bottom
 ]);
 const vertexBuffer = device.createBuffer({
     size: verts.byteLength,
     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
 })
 device.queue.writeBuffer(vertexBuffer, 0, verts)
+const indexBuffer = device.createBuffer({
+    size: indices.byteLength,
+    usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+})
+device.queue.writeBuffer(indexBuffer, 0, indices)
 
-// description
+// vertex layout: 6 floats per-vertex (pos: 3, color: 3)
 const vertexBuffers = [
     {
-        arrayStride: 4 * 4, // 4 floats per-vertex
+        arrayStride: 6 * 4,
         attributes: [
-            { shaderLocation: 0, offset: 0, format: 'float32x2' }, // pos
-            { shaderLocation: 1, offset: 2 * 4, format: 'float32x2' }, // uv
+            { shaderLocation: 0, offset: 0, format: 'float32x3' }, // pos
+            { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, // color
         ],
     },
 ]
 
-// Create a checkerboard texture (RGBA8) in linear memory [Uint8]
-const W = 256,
-    H = 256 // bytesPerRow must be multiple of 256 -> 256*4=1024
-const pixels = new Uint8Array(W * H * 4)
-for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-        const i = (y * W + x) * 4
-        const c = ((x >> 5) & 1) ^ ((y >> 5) & 1) ? 230 : 40 // 32px tiles
-        pixels[i + 0] = c // R
-        pixels[i + 1] = c // G
-        pixels[i + 2] = c // B
-        pixels[i + 3] = 255 // A
-    }
+// Depth
+const depthFormat = 'depth24plus'
+let depthTex = makeDepthTexture()
+
+function makeDepthTexture() {
+    return device.createTexture({
+        size: { width: canvas.width, height: canvas.height, depthOrArrayLayers: 1 },
+        format: depthFormat,
+        usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
 }
-
-// Create an RGBA8 GPU texture and upload the CPU `pixels` data into it
-// (rows pitched by bytesPerRow) so shaders can sample it.
-const texture = device.createTexture({
-    size: { width: W, height: H, depthOrArrayLayers: 1 },
-    format: 'rgba8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-})
-device.queue.writeTexture(
-    { texture },
-    pixels,
-    { bytesPerRow: W * 4, rowsPerImage: H },
-    { width: W, height: H, depthOrArrayLayers: 1 }
-)
-
-// Create a sampler that clamps UVs at the edges and uses linear filtering
-// for minification and magnification.
-const sampler = device.createSampler({
-    addressModeU: 'clamp-to-edge',
-    addressModeV: 'clamp-to-edge',
-    magFilter: 'linear',
-    minFilter: 'linear',
-})
 
 const pipeline = await device.createRenderPipelineAsync({
     layout: 'auto',
     vertex: { module, entryPoint: 'vs', buffers: vertexBuffers },
     fragment: { module, entryPoint: 'fs', targets: [{ format }] },
-    primitive: { topology: 'triangle-list' },
+    primitive: { topology: 'triangle-list', cullMode: 'back', frontFace: 'ccw' },
+    depthStencil: {
+        format: depthFormat,
+        depthWriteEnabled: true,
+        depthCompare: 'less', // keep closest fragment
+    },
 })
 
+// Uniforms (MVP)
+const uniformBuffer = device.createBuffer({
+    size: 16 * 4, // 4x4 matrix (f32)
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+})
 const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
-    entries: [
-        { binding: 0, resource: sampler },
-        { binding: 1, resource: texture.createView() },
-    ],
+    entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
 })
 
 const start = performance.now()
-const amp = 0.15
+
+function updateUniforms() {
+    const t = performance.now() * 0.001
+    const aspect = canvas.width / canvas.height
+
+    const M = mat4.rotationY(t)
+    const V = mat4.lookAt(vec3.create(0, 0, 4), vec3.create(0, 0, 0), vec3.create(0, 1, 0))
+    const P = mat4.perspective(Math.PI / 3, aspect, 0.1, 100) // WebGPU-friendly (Z in 0..1)
+    const VP = mat4.multiply(P, V)
+    const MVP = mat4.multiply(VP, M)
+
+    device.queue.writeBuffer(uniformBuffer, 0, MVP)
+}
 
 function frame() {
+    updateUniforms()
+
     const encoder = device.createCommandEncoder()
-    const view = context.getCurrentTexture().createView()
+    const colorView = context.getCurrentTexture().createView()
+    const depthView = depthTex.createView()
 
     const pass = encoder.beginRenderPass({
         colorAttachments: [
             {
-                view,
+                view: colorView,
                 loadOp: 'clear',
                 clearValue: { r: 0.06, g: 0.08, b: 0.1, a: 1.0 },
                 storeOp: 'store',
             },
         ],
+        depthStencilAttachment: {
+            view: depthView,
+            depthLoadOp: 'clear',
+            depthClearValue: 1.0,
+            depthStoreOp: 'store',
+        },
     })
 
     pass.setPipeline(pipeline)
     pass.setBindGroup(0, bindGroup)
     pass.setVertexBuffer(0, vertexBuffer)
-    pass.draw(6)
+    pass.setIndexBuffer(indexBuffer, 'uint16')
+    pass.drawIndexed(36, 1, 0, 0, 0)
     pass.end()
 
     device.queue.submit([encoder.finish()])

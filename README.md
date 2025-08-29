@@ -48,3 +48,14 @@ npx live-server
 - Ensure aspect-correct rendering still works after geometry changes.
 
 ![Step 4 — Index Buffer + Rectangle](images/step4.png)
+
+## Step 5
+
+- Move to 3D: render a colored cube with interleaved attributes — position (`@location(0) vec3<f32>`) and color (`@location(1) vec3<f32>`); draw via an index buffer (36 indices).
+- Add a depth buffer: create a `depth24plus` texture, enable `depthWriteEnabled: true` and `depthCompare: 'less'` in the pipeline, and attach the depth target in the render pass.
+- Compute an MVP each frame: rotate the model over time, use `lookAt` for the view, and `perspective(aspect)` for projection (WebGPU clip space).
+- Store the `mat4x4<f32>` MVP in a uniform buffer bound at `@group(0) @binding(0)` and multiply in the vertex shader.
+- Use back-face culling (`cullMode: 'back'`, `frontFace: 'ccw'`) and render with `pass.drawIndexed`.
+- Animate with `requestAnimationFrame` for smooth rotation.
+
+![Step 5 — Spinning Cube + Depth](images/step5.png)
