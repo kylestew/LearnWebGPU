@@ -59,3 +59,14 @@ npx live-server
 - Animate with `requestAnimationFrame` for smooth rotation.
 
 ![Step 5 — Spinning Cube + Depth](images/step5.png)
+
+## Step 6
+
+- Texture mapping: replace the color attribute with UVs — position (`@location(0) vec3<f32>`) and uv (`@location(1) vec2<f32>`); update the vertex layout (stride = 5 floats).
+- Upload an image as a GPU texture using `createImageBitmap` (or `HTMLImageElement`) and `device.queue.copyExternalImageToTexture`.
+- Create a sampler (linear filtering, `addressMode: 'repeat'` or `'clamp-to-edge'`) and a sampled 2D texture; add both to the bind group.
+- Keep the MVP uniform at `@group(0) @binding(0)`; bind `@binding(1) texture_2d<f32>` and `@binding(2) sampler`.
+- Pass UVs from the vertex shader and sample in the fragment: `textureSample(tex, smp, uv)` to produce the final color.
+- Retain depth testing and back-face culling; continue to use `drawIndexed` for the cube and animate with `requestAnimationFrame`.
+
+![Step 6 — Textured Cube](images/step6.png)
