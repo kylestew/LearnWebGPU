@@ -62,11 +62,11 @@ npx live-server
 
 ## Step 6
 
-- Texture mapping: replace the color attribute with UVs — position (`@location(0) vec3<f32>`) and uv (`@location(1) vec2<f32>`); update the vertex layout (stride = 5 floats).
-- Upload an image as a GPU texture using `createImageBitmap` (or `HTMLImageElement`) and `device.queue.copyExternalImageToTexture`.
-- Create a sampler (linear filtering, `addressMode: 'repeat'` or `'clamp-to-edge'`) and a sampled 2D texture; add both to the bind group.
-- Keep the MVP uniform at `@group(0) @binding(0)`; bind `@binding(1) texture_2d<f32>` and `@binding(2) sampler`.
-- Pass UVs from the vertex shader and sample in the fragment: `textureSample(tex, smp, uv)` to produce the final color.
-- Retain depth testing and back-face culling; continue to use `drawIndexed` for the cube and animate with `requestAnimationFrame`.
+- Lambert shading with per-vertex color: interleave position (`@location(0) vec3<f32>`), normal (`@location(1) vec3<f32>`), and color (`@location(2) vec3<f32>`); update the vertex layout (stride = 9 floats).
+- Uniforms struct: `mvp: mat4x4<f32>`, `normalMatrix: mat4x4<f32>` (transpose(inverse(model))), and `lightDir: vec3<f32>`; bind at `@group(0) @binding(0)`.
+- Compute per-frame matrices: rotate the model over time, build `view = lookAt(...)` and `proj = perspective(aspect, ...)`, then `mvp = proj * view * model`.
+- Fragment shader uses Lambert: `N = normalize(n)`, `L = normalize(-lightDir)`, `ndotl = max(dot(N, L), 0)`, final color = `albedo * (0.15 + 0.85 * ndotl)`.
+- Enable depth testing (`depth24plus`, `depthWriteEnabled: true`, `depthCompare: 'less'`) and back-face culling (`cullMode: 'back'`, `frontFace: 'ccw'`).
+- Draw the indexed cube (`drawIndexed`) and animate with `requestAnimationFrame`.
 
-![Step 6 — Textured Cube](images/step6.png)
+![Step 6 — Lambert Shaded Cube](images/step6.png)

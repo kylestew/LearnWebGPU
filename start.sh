@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python -m http.server
+npx live-server

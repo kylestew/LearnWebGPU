@@ -162,7 +162,7 @@ const bindGroup = device.createBindGroup({
 })
 
 // light direction (world space), normalized
-const lightDir = vec3.normalize(vec3.create(1, 1, 0.5))
+const lightDir = vec3.normalize(vec3.create(1, 1, -1))
 
 function updateUniforms() {
     const t = performance.now() * 0.001
