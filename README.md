@@ -70,3 +70,14 @@ npx live-server
 - Draw the indexed cube (`drawIndexed`) and animate with `requestAnimationFrame`.
 
 ![Step 6 — Lambert Shaded Cube](images/step6.png)
+
+## Step 7
+
+- GPU instancing: render 1000 cubes efficiently with a single draw call using per-instance data.
+- Instance buffer: store position (`@location(2) vec3<f32>`), color (`@location(3) vec3<f32>`), and scale (`@location(4) f32`) per instance; set `stepMode: 'instance'` for instance attributes.
+- Vertex shader: blend vertex colors with instance colors, apply instance scale and position transforms, and animate with wave motion using time uniforms.
+- Grid layout: create a 10×10×10 grid of cubes with procedural positioning, color gradients, and varied scales.
+- Performance: demonstrate efficient rendering of many objects via `pass.drawIndexed(36, 1000)` instead of 1000 separate draw calls.
+- Animation: wave motion based on instance position and time creates a dynamic, flowing effect across the cube field.
+
+![Step 7 — Instancing](images/step7.png)

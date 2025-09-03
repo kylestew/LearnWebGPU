@@ -10,88 +10,84 @@ const device = await adapter.requestDevice()
 const format = navigator.gpu.getPreferredCanvasFormat()
 context.configure({ device, format, alphaMode: 'opaque' })
 
-// WSGL: Lambert shading
+// WGSL: Non-lit cube with instancing
 const shaderWGSL = /* wgsl */ `
 struct Uniforms {
-    mvp:            mat4x4<f32>,
-    normalMatrix:   mat4x4<f32>,  // inverse-transpose of model
-    lightDir:       vec3<f32>,    // direction from light toward scene (world space, normalized)
-    _pad0:          f32,
+    mvp: mat4x4<f32>,
+    time: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 };
 @group(0) @binding(0) var<uniform> U: Uniforms;
 
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
-    @location(0) normal: vec3<f32>,
-    @location(1) color: vec3<f32>,
+    @location(0) color: vec3<f32>,
 };
 
 @vertex
-fn vs(@location(0) inPos: vec3<f32>,
-      @location(1) inNrm: vec3<f32>,
-      @location(2) inCol: vec3<f32>) -> VSOut {
+fn vs(@location(0) vertexPos: vec3<f32>,
+      @location(1) vertexColor: vec3<f32>,
+      @location(2) instancePos: vec3<f32>,
+      @location(3) instanceColor: vec3<f32>,
+      @location(4) instanceScale: f32,
+      @builtin(instance_index) instanceIdx: u32) -> VSOut {
 
-    // transform normal with inverse-transpose(model)
-    let n = normalize( (U.normalMatrix * vec4<f32>(inNrm, 0.0)).xyz );
-
+    // Apply wave animation based on instance position and time
+    let waveOffset = sin(U.time + instancePos.x * 0.5 + instancePos.z * 0.5) * 0.3;
+    let animatedPos = instancePos + vec3<f32>(0.0, waveOffset, 0.0);
+    
+    // Scale vertex position, then translate by instance position
+    let scaledPos = vertexPos * instanceScale;
+    let worldPos = scaledPos + animatedPos;
+    
     var out: VSOut;
-    out.pos = U.mvp * vec4<f32>(inPos, 1.0);
-    out.normal = n;
-    out.color = inCol;
+    out.pos = U.mvp * vec4<f32>(worldPos, 1.0);
+    out.color = mix(vertexColor, instanceColor, 0.7); // blend vertex and instance colors
     return out;
 }
 
 @fragment
-fn fs(@location(0) nrm: vec3<f32>,
-      @location(1) albedo: vec3<f32>) -> @location(0) vec4<f32> {
-
-    // For a lightDir pointing FROM light toward the scene,
-    // L (toward light ) = -lightDir
-    let N = normalize(nrm);
-    let L = normalize(-U.lightDir);
-    let ndotl = max(dot(N, L), 0.0);
-
-    let ambient = 0.15;
-    let lit = albedo * (ambient + ndotl * 0.85);
-
-    return vec4<f32>(lit, 1.0);
+fn fs(@location(0) color: vec3<f32>) -> @location(0) vec4<f32> {
+    return vec4<f32>(color, 1.0);
 }
 `
 const module = device.createShaderModule({ code: shaderWGSL })
 
-// Cube geometry: (24 verts: pos, normal, color)
+// Cube geometry: (24 verts: pos, color)
 // prettier-ignore
 const verts = new Float32Array([
   // face: +Z (front)
-  -1,-1, 1,   0,0, 1,   1,0,0,
-   1,-1, 1,   0,0, 1,   1,1,0,
-   1, 1, 1,   0,0, 1,   1,1,1,
-  -1, 1, 1,   0,0, 1,   1,0,1,
+  -1,-1, 1,   1,0,0,
+   1,-1, 1,   1,1,0,
+   1, 1, 1,   1,1,1,
+  -1, 1, 1,   1,0,1,
   // -Z (back)
-  -1,-1,-1,   0,0,-1,   0,0,1,
-   1,-1,-1,   0,0,-1,   0,1,1,
-   1, 1,-1,   0,0,-1,   0,1,0,
-  -1, 1,-1,   0,0,-1,   0,0,0,
+  -1,-1,-1,   0,0,1,
+   1,-1,-1,   0,1,1,
+   1, 1,-1,   0,1,0,
+  -1, 1,-1,   0,0,0,
   // +X (right)
-   1,-1, 1,   1,0,0,    1,1,0,
-   1,-1,-1,   1,0,0,    0,1,1,
-   1, 1,-1,   1,0,0,    0,1,0,
-   1, 1, 1,   1,0,0,    1,1,1,
+   1,-1, 1,   1,1,0,
+   1,-1,-1,   0,1,1,
+   1, 1,-1,   0,1,0,
+   1, 1, 1,   1,1,1,
   // -X (left)
-  -1,-1,-1,  -1,0,0,    0,0,1,
-  -1,-1, 1,  -1,0,0,    1,0,0,
-  -1, 1, 1,  -1,0,0,    1,0,1,
-  -1, 1,-1,  -1,0,0,    0,0,0,
+  -1,-1,-1,   0,0,1,
+  -1,-1, 1,   1,0,0,
+  -1, 1, 1,   1,0,1,
+  -1, 1,-1,   0,0,0,
   // +Y (top)
-  -1, 1, 1,   0,1,0,    1,0,1,
-   1, 1, 1,   0,1,0,    1,1,1,
-   1, 1,-1,   0,1,0,    0,1,0,
-  -1, 1,-1,   0,1,0,    0,0,0,
+  -1, 1, 1,   1,0,1,
+   1, 1, 1,   1,1,1,
+   1, 1,-1,   0,1,0,
+  -1, 1,-1,   0,0,0,
   // -Y (bottom)
-  -1,-1,-1,   0,-1,0,   0,0,1,
-   1,-1,-1,   0,-1,0,   0,1,1,
-   1,-1, 1,   0,-1,0,   1,1,0,
-  -1,-1, 1,   0,-1,0,   1,0,0,
+  -1,-1,-1,   0,0,1,
+   1,-1,-1,   0,1,1,
+   1,-1, 1,   1,1,0,
+  -1,-1, 1,   1,0,0,
 ]);
 // 12 triangles (36 indices), CCW
 // prettier-ignore
@@ -114,14 +110,60 @@ const indexBuffer = device.createBuffer({
 })
 device.queue.writeBuffer(indexBuffer, 0, indices)
 
-// vertex layout: pos(3), normal(3), color(3) -> 9 floats -> 36 bytes stride
+// Create instance data: grid of cubes
+const GRID_SIZE = 10
+const INSTANCE_COUNT = GRID_SIZE * GRID_SIZE * GRID_SIZE
+const instanceData = new Float32Array(INSTANCE_COUNT * 8) // pos(3) + color(3) + scale(1) + pad(1)
+
+let idx = 0
+for (let x = 0; x < GRID_SIZE; x++) {
+    for (let y = 0; y < GRID_SIZE; y++) {
+        for (let z = 0; z < GRID_SIZE; z++) {
+            const baseIdx = idx * 8
+
+            // Position: center the grid around origin
+            instanceData[baseIdx + 0] = (x - GRID_SIZE / 2) * 2.5
+            instanceData[baseIdx + 1] = (y - GRID_SIZE / 2) * 2.5
+            instanceData[baseIdx + 2] = (z - GRID_SIZE / 2) * 2.5
+
+            // Color: gradient based on position
+            instanceData[baseIdx + 3] = x / GRID_SIZE // R
+            instanceData[baseIdx + 4] = y / GRID_SIZE // G
+            instanceData[baseIdx + 5] = z / GRID_SIZE // B
+
+            // Scale: vary between 0.3 and 0.8
+            instanceData[baseIdx + 6] = 0.3 + (Math.sin(x + y + z) * 0.25 + 0.25)
+
+            // Padding for alignment
+            instanceData[baseIdx + 7] = 0.0
+
+            idx++
+        }
+    }
+}
+
+const instanceBuffer = device.createBuffer({
+    size: instanceData.byteLength,
+    usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+})
+device.queue.writeBuffer(instanceBuffer, 0, instanceData)
+
+// vertex layout: pos(3), color(3) -> 6 floats -> 24 bytes stride
 const vertexBuffers = [
     {
-        arrayStride: 9 * 4,
+        arrayStride: 6 * 4,
         attributes: [
             { shaderLocation: 0, offset: 0, format: 'float32x3' }, // pos
-            { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, // norrmal
-            { shaderLocation: 2, offset: 6 * 4, format: 'float32x3' }, // color
+            { shaderLocation: 1, offset: 3 * 4, format: 'float32x3' }, // color
+        ],
+    },
+    {
+        arrayStride: 8 * 4, // instancePos(3) + instanceColor(3) + scale(1) + pad(1)
+        stepMode: 'instance',
+        attributes: [
+            { shaderLocation: 2, offset: 0, format: 'float32x3' }, // instancePos
+            { shaderLocation: 3, offset: 3 * 4, format: 'float32x3' }, // instanceColor
+            { shaderLocation: 4, offset: 6 * 4, format: 'float32' }, // instanceScale
         ],
     },
 ]
@@ -150,8 +192,8 @@ const pipeline = await device.createRenderPipelineAsync({
     },
 })
 
-// Uniforms (MVP)
-const UNIFORM_FLOATS = 16 + 16 + 4
+// Uniforms (MVP + time)
+const UNIFORM_FLOATS = 16 + 4 // MVP(16) + time + padding(3)
 const uniformBuffer = device.createBuffer({
     size: UNIFORM_FLOATS * 4,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -161,33 +203,22 @@ const bindGroup = device.createBindGroup({
     entries: [{ binding: 0, resource: { buffer: uniformBuffer } }],
 })
 
-// light direction (world space), normalized
-const lightDir = vec3.normalize(vec3.create(1, 1, -1))
-
 function updateUniforms() {
     const t = performance.now() * 0.001
     const aspect = canvas.width / canvas.height
 
-    // Model: rotate
-    let M = mat4.rotationY(t)
-    M = mat4.multiply(mat4.rotationX(t * 0.6), M)
+    // View & Projection (no model matrix, instances handle positioning)
+    const V = mat4.lookAt(vec3.create(20, 15, 20), vec3.create(0, 0, 0), vec3.create(0, 1, 0))
+    const P = mat4.perspective(Math.PI / 4, aspect, 0.1, 100)
+    const MVP = mat4.multiply(P, V)
 
-    // View & Projection
-    const V = mat4.lookAt(vec3.create(0, 0, 5), vec3.create(0, 0, 0), vec3.create(0, 1, 0))
-    const P = mat4.perspective(Math.PI / 3, aspect, 0.1, 100)
-
-    const MVP = mat4.multiply(mat4.multiply(P, V), M)
-
-    // Normal matrix as 4x4: transpose(inverse(M))
-    const Minv = mat4.invert(M)
-    const N4 = mat4.transpose(Minv)
-
-    // Pack uniforms: [MVP(16), N4(16), lightDir(3), pad]
+    // Pack uniforms: [MVP(16), time(1), pad(3)]
     const data = new Float32Array(UNIFORM_FLOATS)
     data.set(MVP, 0)
-    data.set(N4, 16)
-    data.set(lightDir, 32)
-    data[35] = 0.0 // pad
+    data[16] = t
+    data[17] = 0.0 // pad
+    data[18] = 0.0 // pad
+    data[19] = 0.0 // pad
     device.queue.writeBuffer(uniformBuffer, 0, data)
 }
 
@@ -217,9 +248,10 @@ function frame() {
 
     pass.setPipeline(pipeline)
     pass.setBindGroup(0, bindGroup)
-    pass.setVertexBuffer(0, vertexBuffer)
+    pass.setVertexBuffer(0, vertexBuffer) // vertex data
+    pass.setVertexBuffer(1, instanceBuffer) // instance data
     pass.setIndexBuffer(indexBuffer, 'uint16')
-    pass.drawIndexed(indices.length)
+    pass.drawIndexed(indices.length, INSTANCE_COUNT) // draw all instances
     pass.end()
 
     device.queue.submit([encoder.finish()])
